@@ -1,0 +1,196 @@
+# Whole-Machine Privacy BlockDAG: Integrated Architecture Brief
+
+Date: 2026-10-30  
+Status: Research direction, not a consensus specification
+
+Companion document: `/home/sy/whole-machine-currency-research.md`
+
+## 1. Objective
+
+Develop a privacy-preserving cryptocurrency with:
+
+- whole-computer proof of work accessible to ordinary personal computers;
+- a blockDAG for fast proof-of-work block production;
+- Orchard-style shielded payments;
+- proof of stake integrated into consensus from genesis;
+- low hardware requirements for both mining and running a node;
+- ongoing, broad coin distribution rather than concentration among early specialized miners.
+
+The social goal is to let people obtain their first coins by using hardware they already own. The technical goal is to make balanced general-purpose computers useful for securing the network without claiming that specialized mining hardware can be made impossible.
+
+Smart contracts are explicitly deferred. They are not needed for the first protocol and should not drive its design.
+
+## 2. Proposed architecture
+
+```text
+Composite whole-machine PoW ─┐
+                             ├─ one hybrid consensus and DAG fork-choice rule
+PoS block production --------┘
+                                      |
+                              blockDAG ordering
+                                      |
+                         Orchard shielded transactions
+```
+
+The three main responsibilities should remain conceptually separate:
+
+- PoW demonstrates computational work and helps produce blocks.
+- PoS demonstrates coin-backed participation and contributes to block production and chain selection.
+- The blockDAG orders valid blocks and transactions.
+- Orchard validates and shields payments; it is not part of mining.
+
+PoS must not be treated as an independent security switch added after launch. Nodes need one deterministic rule for combining PoW and PoS evidence, resolving forks, and handling disagreements.
+
+## 3. Hardware and accessibility goals
+
+### Initial reference machine
+
+The aspirational mining reference is a 2011-era Intel Core i5-class PC with approximately 4 GB RAM and a GPU. A modern inexpensive PC should also be usable. This is a benchmarking target, not a promise that every old computer will mine profitably or receive regular block rewards.
+
+### Node requirements
+
+Mining and validation requirements must be specified separately:
+
+- A miner may be required to use CPU and RAM, with GPU and storage added only if experiments justify them.
+- A full node should verify consensus proofs using inexpensive, deterministic CPU operations.
+- A CPU-only node should ideally be able to validate blocks produced by GPU-assisted miners.
+- Wallet proving, shielded-note scanning, synchronization, bandwidth, disk writes, and DAG pruning need independent budgets.
+
+A pruned blockDAG storage requirement below 5 GB is a research question, not an established target. It depends on block rate, transaction size, retained proof data, pruning checkpoints, and what a new node must verify during synchronization.
+
+A screen, manufacturer identity, or physical-PC attestation cannot reliably be required by permissionless PoW. Custom machines can still integrate general-purpose components.
+
+## 4. Composite, latency-bound PoW
+
+### Candidate construction
+
+Start with the simplest CPU-RAM proof rather than immediately requiring every component:
+
+```text
+block header + DAG parents + nonce
+              |
+       unpredictable CPU stage
+              |
+       memory-latency-bound stage
+              |
+       deterministic final proof
+```
+
+Each stage should depend on the previous stage's unpredictable output. Independent component benchmarks added together would allow separate optimization and would not demonstrate balanced whole-machine work.
+
+A GPU stage may be added after measurements show a clear benefit. Storage should remain optional until repeated proof-of-storage-over-time challenges can be justified without excessive cost.
+
+### Essential properties
+
+- Mining may be expensive, but verification must be fast and predictable.
+- Consensus results must not depend on GPU floating-point behavior, drivers, or self-reported specifications.
+- Difficulty must measure completed work rather than claimed component weights.
+- Rewards should remain approximately proportional to real computational resources: 1,000 comparable computers may fairly earn about 1,000 times one computer's expected reward.
+- Old and new hardware performance ratios must be measured experimentally. No fixed ratio or ASIC resistance should be assumed.
+
+The decisive experiment is whether an ordinary computer can produce proofs at a useful rate while every ordinary full node verifies them cheaply.
+
+## 5. BlockDAG and Orchard
+
+ZKas is a candidate architectural base because it combines a Kaspa-like blockDAG, Orchard-style privacy, and kHeavyHash PoW. Its code has not yet been reviewed in this research.
+
+Replacing kHeavyHash should not inherently require redesigning Orchard or DAG ordering. It does require a consensus-wide replacement of:
+
+- proof serialization and header commitments;
+- miner and validator implementations;
+- difficulty measurement and retargeting;
+- validation limits and denial-of-service controls;
+- tests and network versioning.
+
+High DAG throughput makes cheap verification especially important. Expensive per-block CPU, memory, GPU, or storage verification could become a denial-of-service vector.
+
+Shielded payment proofs must not become part of the PoW. Privacy costs belong to transaction creation and validation, not to the mining lottery.
+
+## 6. PoS from the beginning
+
+### Zano findings
+
+Zano's current code was inspected at commit `d1f2d9655d1aebf05d4ed281f2c691f9f9078bd1`.
+
+Zano does not use PoS only for checkpoint finality. PoW and PoS produce competing blocks on the same linear chain:
+
+- PoW blocks use the normal long-hash check.
+- PoS blocks contain a coinstake input and validate a stake kernel.
+- The stake kernel incorporates the latest PoW block hash, previous PoS kernel, timestamp, and stake key image.
+- PoW and PoS have separate difficulty adjustment.
+- Fork choice combines cumulative PoW and PoS difficulty multiplicatively.
+- Consecutive blocks of the same type lose weight by `0.75^n`, and long PoS-only runs are capped.
+- Zarcanum PoS proves ownership and the amount-weighted difficulty condition using shielded outputs without publicly identifying the exact ring output or revealing its amount.
+
+Relevant source locations in the Zano repository:
+
+- `src/currency_core/blockchain_storage.cpp:7698` — PoS block validation
+- `src/currency_core/blockchain_storage.cpp:8931` — stake modifier anchored to PoW
+- `src/currency_core/currency_format_utils.cpp:5368` — combined fork choice
+- `src/currency_core/pos_mining.cpp:48` — stake-kernel iterations
+- `src/crypto/zarcanum.cpp:200` — Zarcanum proof verification
+
+This was a source review, not a security audit or successful local build.
+
+### Adaptation to a blockDAG
+
+Zano's linear-chain mechanisms cannot simply be copied into a multi-tip DAG. The new protocol must define:
+
+- which PoW blocks anchor PoS eligibility when several tips exist;
+- whether PoS blocks have parents, create blocks, vote on DAG checkpoints, or combine these roles;
+- one combined PoW/PoS DAG score and deterministic ordering rule;
+- how alternate DAG branches affect stake eligibility and key-image uniqueness;
+- protections against nothing-at-stake voting, long-range histories, stake grinding, censorship, and validator inactivity;
+- whether PoS provides block production, finality, or both.
+
+The initial working preference is Zano-style integrated block production, not a plan to bolt PoS onto a launched PoW network later. A finality-only overlay remains a fallback if mixed DAG block production becomes too complex.
+
+Orchard and Zarcanum are not interchangeable. The project must either design an Orchard-compatible private staking proof or use explicit/public validator bonds while keeping ordinary payments shielded. Public staking is simpler but leaks validator balances and identities.
+
+Staking rewards favor existing holders and do not replace accessible PoW issuance. PoS yield and PoW distribution need separate monetary accounting.
+
+## 7. Distribution and monetary direction
+
+The companion research brief remains the primary reference. Its main directions are:
+
+- protocol-native, share-based reward smoothing rather than reliance on mining pools;
+- proportional rewards for verified work;
+- a modest incentive for sustained resource-backed participation;
+- an optional tiered service lottery, not lottery-based primary issuance;
+- participation-responsive issuance: fewer coins when participation is low and more as verified participation grows;
+- no assumption that a huge nominal supply solves reward variance or dust usability.
+
+A candidate model is `R_t = aW_t + bN_t`, with participant rewards `r_i = a*w_i + b`, subject to strict eligibility, anti-dust, aggregation, and issuance-abuse analysis. It is not final.
+
+Time requirements alone do not prevent Sybil identities. A powerful machine may divide real resources among identities; this is acceptable when each identity makes a meaningful sustained commitment and splitting provides only a modest advantage.
+
+One trillion blocks per second is not a viable solution to weak-miner payouts. Shares and rewards must be aggregated without requiring every small payment to become an independent on-chain transaction.
+
+## 8. Development sequence
+
+Experimental components can be prototyped separately, but the genesis consensus specification must account for PoS from the outset.
+
+1. **Consensus model:** Define the hybrid PoW/PoS DAG state, block types, parent rules, fork choice, stake eligibility, and attack assumptions before implementation.
+2. **PoW interface:** Put PoW behind one shared miner/validator interface in a ZKas-derived devnet. Keep DAG and Orchard otherwise unchanged initially.
+3. **CPU-RAM prototype:** Implement deterministic proof generation and cheap verification. Benchmark old PCs, new PCs, CPUs with different cache sizes, and simulated specialized optimizations.
+4. **Integrated PoS devnet:** Add the selected PoS block-production and DAG-weighting rules. Test conflicting branches, repeated stake use, long PoS runs, validator outages, and deep reorganizations.
+5. **Reward system:** Prototype native shares, aggregation, adaptive issuance, and small sustained-participation incentives in simulation before committing them to consensus.
+6. **Accessibility validation:** Measure full-node CPU, RAM, storage, bandwidth, initial sync, Orchard verification, and pruned-state requirements on the same minimum hardware class.
+7. **Optional modules:** Consider GPU stages, storage commitments, and lotteries only after the core protocol is coherent.
+
+No public launch should rely on a future hard fork to make PoS part of consensus.
+
+## 9. Main unresolved questions
+
+- Can one combined PoW/PoS DAG fork-choice rule avoid oscillations and dominance by either resource?
+- Can PoW verification remain cheap enough for high block rates and minimum-spec nodes?
+- What exactly does a PoS block reference and finalize in a DAG?
+- Can staking remain private without introducing an incompatible second privacy construction?
+- Can weak miners receive usable small rewards without exploding ledger size or creating a strong splitting incentive?
+- Can a pruned node remain below the desired storage and synchronization budgets?
+- What happens when participation, coin value, or staking availability changes rapidly?
+- Are botnets, censorship, and early low-security periods acceptable experimental risks or problems requiring explicit mitigation?
+
+## 10. Current concise direction
+
+Build a privacy blockDAG whose genesis consensus combines whole-machine PoW and PoS. Start the PoW research with sequential, data-dependent CPU-RAM work and cheap CPU verification. Use Orchard for payments, define hybrid DAG fork choice before coding, and treat Zano as evidence that private hybrid block production is possible—not as code that can be copied directly. Preserve broad distribution through accessible mining and ongoing issuance, while keeping smart contracts and unproven component requirements out of the initial design.
